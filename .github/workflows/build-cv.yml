@@ -15,6 +15,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sync talk/conference counts in summary
+        run: python update_talk_stats.py
+
       - name: Compile LaTeX to PDF
         uses: xu-cheng/latex-action@v3
         with:
@@ -24,6 +32,6 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add main.pdf
+          git add main.tex main.pdf
           git diff --cached --quiet || git commit -m "Auto-build CV PDF [$(date -u +%Y-%m-%d)]"
           git push
