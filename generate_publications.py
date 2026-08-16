@@ -413,15 +413,16 @@ def replace_between(text, start_marker, end_marker, new_body):
     return new_text
 
 
-def update_summary_stats(text, h_index, total_citations, n_first):
+def update_summary_stats(text, h_index, total_citations, n_first, n_total):
     pattern = re.compile(
-        r"h-index of \d+ and a total of \d+ citations, with \d+ first author articles"
+        r"published \d+ peer-reviewed articles \(\d+ as first author\), "
+        r"with an h-index of \d+ and \d+ total citations"
     )
     if h_index is None or total_citations is None:
         return text
     replacement = (
-        f"h-index of {h_index} and a total of {total_citations} citations, "
-        f"with {n_first} first author articles"
+        f"published {n_total} peer-reviewed articles ({n_first} as first author), "
+        f"with an h-index of {h_index} and {total_citations} total citations"
     )
     new_text, n = pattern.subn(replacement, text)
     if n != 1:
@@ -524,7 +525,9 @@ if __name__ == "__main__":
         text = tex_file.read_text(encoding="utf-8")
         new_text = replace_between(text, START_FIRST, END_FIRST, first_block)
         new_text = replace_between(new_text, START_OTHER, END_OTHER, other_block)
-        new_text = update_summary_stats(new_text, h_index, total_citations, len(first_author_docs))
+        new_text = update_summary_stats(
+            new_text, h_index, total_citations, len(first_author_docs), len(articles)
+        )
         if new_text != text:
             tex_file.write_text(new_text, encoding="utf-8")
             print(f"Written -> {tex_file}")
