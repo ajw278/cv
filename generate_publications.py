@@ -368,9 +368,10 @@ def build_entry(doc):
     title = tex_escape(title)
     cites = int(doc.get("citation_count") or 0)
     date  = parse_month_year(doc.get("pubdate", ""))
+    cite_str = f" -- Citations: {cites}" if cites else ""
 
     return (
-        f"\\cventry{{{date}}}{{\\textnormal{{\\textit{{{title} -- Citations: {cites}}}"
+        f"\\cventry{{{date}}}{{\\textnormal{{\\textit{{{title}{cite_str}}}"
         f" \\newline {format_authors(doc)} -- {format_journal(doc)}}}}}{{}}{{}}{{}}{{}}"
     )
 
