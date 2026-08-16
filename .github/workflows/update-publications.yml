@@ -1,0 +1,39 @@
+name: Update publications
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC
+    - cron: "0 6 * * 1"
+  workflow_dispatch:   # also allows manual trigger from GitHub Actions tab
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Regenerate publication list in main.tex
+        env:
+          ADS_API_KEY: ${{ secrets.ADS_API_KEY }}
+        run: python generate_publications.py
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add main.tex
+          # Only commit if the file actually changed
+          git diff --cached --quiet || git commit -m "Auto-update publications [$(date -u +%Y-%m-%d)]"
+          git push
