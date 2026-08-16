@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Regenerate the Publication List section of main.tex from ADS / Sci-X.
+Regenerate the Publication List section of main_long.tex from ADS / Sci-X,
+and keep the summary stats in main.tex (the short CV) in sync.
 
 Usage:
     python generate_publications.py                # ADS, falling back to Sci-X
@@ -9,10 +10,11 @@ Usage:
     python generate_publications.py --compare         # fetch both, report diffs, write nothing
 
 Fetches every paper in the bibliography library, then rewrites the two
-auto-generated blocks in main.tex (first-author and other publications) in
-place, keeping everything else in the file untouched. Also refreshes the
+auto-generated blocks in main_long.tex (first-author and other publications)
+in place, keeping everything else in the file untouched. Also refreshes the
 h-index / total citations / first-author-count numbers quoted in the
-research summary.
+research summary of both main_long.tex and main.tex (which has no full
+publication list, just that summary sentence).
 
 Sci-X (https://scixplorer.org) is the NASA-funded successor to ADS and
 exposes the same API shape at a different host, so it is used as an
@@ -23,6 +25,7 @@ Requirements:
 """
 
 import argparse
+import html
 import os
 import re
 import sys
@@ -48,7 +51,12 @@ PROVIDERS = {
 # Order in which providers are tried when none is forced explicitly.
 PROVIDER_PRIORITY = ["ads", "scix"]
 
-TEX_FILE = Path(__file__).parent / "main.tex"
+# The full publication list lives only in the long CV; the short CV just
+# quotes the summary stats (h-index / citations / first-author count).
+TEX_FILES = [
+    Path(__file__).parent / "main_long.tex",
+    Path(__file__).parent / "main.tex",
+]
 
 FIRST_AUTHOR_RE = re.compile(
     r"^Winter,\s+(Andrew(?:\s+J\.?)*\.?|A\.(?:\s*J\.?)?)\s*$", re.IGNORECASE
@@ -241,6 +249,10 @@ _SUP_OPEN, _SUP_CLOSE = "", ""
 
 def tex_escape(s):
     s = unicodedata.normalize("NFKC", s or "")
+    # ADS titles occasionally leak HTML-entity-encoded XML (e.g. a stray
+    # "&lt;xref .../&gt;" footnote marker) -- unescape entities first so the
+    # tag-stripping pass below can actually see and remove the tag.
+    s = html.unescape(s)
     # ADS titles sometimes embed HTML-ish sub/superscript tags (e.g. "CO<SUB>2</SUB>").
     s = _SUB_RE.sub(lambda m: f"{_SUB_OPEN}{m.group(1)}{_SUB_CLOSE}", s)
     s = _SUP_RE.sub(lambda m: f"{_SUP_OPEN}{m.group(1)}{_SUP_CLOSE}", s)
@@ -384,6 +396,13 @@ def build_block(docs):
 # ── main.tex patching ────────────────────────────────────────────────────────
 
 def replace_between(text, start_marker, end_marker, new_body):
+    """Replace the block between markers, if present.
+
+    Files without the markers (e.g. the short CV, which has no full
+    publication list) are left untouched rather than erroring.
+    """
+    if start_marker not in text:
+        return text
     pattern = re.compile(
         re.escape(start_marker) + r".*?" + re.escape(end_marker), re.DOTALL
     )
@@ -495,10 +514,19 @@ if __name__ == "__main__":
     other_docs         = [d for d in articles if not is_first_author(d)]
     print(f"  {len(first_author_docs)} first-author articles, {len(other_docs)} other articles")
 
-    text = TEX_FILE.read_text(encoding="utf-8")
-    text = replace_between(text, START_FIRST, END_FIRST, build_block(first_author_docs))
-    text = replace_between(text, START_OTHER, END_OTHER, build_block(other_docs))
-    text = update_summary_stats(text, h_index, total_citations, len(first_author_docs))
+    first_block = build_block(first_author_docs)
+    other_block = build_block(other_docs)
 
-    TEX_FILE.write_text(text, encoding="utf-8")
-    print(f"Written -> {TEX_FILE}")
+    for tex_file in TEX_FILES:
+        if not tex_file.exists():
+            print(f"[skip] {tex_file} does not exist")
+            continue
+        text = tex_file.read_text(encoding="utf-8")
+        new_text = replace_between(text, START_FIRST, END_FIRST, first_block)
+        new_text = replace_between(new_text, START_OTHER, END_OTHER, other_block)
+        new_text = update_summary_stats(new_text, h_index, total_citations, len(first_author_docs))
+        if new_text != text:
+            tex_file.write_text(new_text, encoding="utf-8")
+            print(f"Written -> {tex_file}")
+        else:
+            print(f"No change -> {tex_file}")

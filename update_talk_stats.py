@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
 """
-Keep the "Conference and Departmental Talks Summary" paragraph in main.tex in
-sync with the actual entries listed under the Departmental Talks and
-Conferences sections.
+Keep the "Conference and Departmental Talks Summary" paragraph in sync with
+the actual entries listed under the Departmental Talks and Conferences
+sections of the long CV (main_long.tex).
 
 Usage:
     python update_talk_stats.py
 
 No network access required -- this only counts \\cventry lines already
-present in main.tex. Safe to run on every push (see build-cv.yml), so the
-summary numbers never go stale when talks are added by hand or via Overleaf.
+present in main_long.tex. Safe to run on every push (see build-cv.yml), so
+the summary numbers never go stale when talks are added by hand or via
+Overleaf. The computed counts are written into the summary sentence in both
+main_long.tex (which also has the itemised lists) and main.tex (the short
+CV, which quotes the same summary sentence but has no itemised lists).
 """
 
 import re
 from pathlib import Path
 
-TEX_FILE = Path(__file__).parent / "main.tex"
+LONG_TEX_FILE = Path(__file__).parent / "main_long.tex"
+TEX_FILES = [LONG_TEX_FILE, Path(__file__).parent / "main.tex"]
 
-_CVENTRY_LINE_RE = re.compile(r"^\\cventry\{", re.MULTILINE)
 _SPACER_RE = re.compile(r"^\\cventry(\{\})+\s*$")
 
 
@@ -55,15 +58,16 @@ def update_summary(text, n_dept, n_conf, n_invited):
     )
     new_text, n = SUMMARY_RE.subn(replacement, text)
     if n != 1:
-        raise RuntimeError(f"Expected exactly one talks-summary match, found {n}")
+        print(f"  warning: expected 1 talks-summary match, found {n} (left unchanged)")
+        return text
     return new_text
 
 
 if __name__ == "__main__":
-    text = TEX_FILE.read_text(encoding="utf-8")
+    long_text = LONG_TEX_FILE.read_text(encoding="utf-8")
 
-    dept_block = extract_block(text, r"\\section\{Departmental Talks\}", r"\\section\{Conferences\}")
-    conf_block = extract_block(text, r"\\section\{Conferences\}\{\}", r"%\\section\{Awards\}")
+    dept_block = extract_block(long_text, r"\\section\{Departmental Talks\}", r"\\section\{Conferences\}")
+    conf_block = extract_block(long_text, r"\\section\{Conferences\}\{\}", r"%\\section\{Awards\}")
 
     n_dept    = count_entries(dept_block)
     n_conf    = count_entries(conf_block)
@@ -73,9 +77,14 @@ if __name__ == "__main__":
     print(f"Conferences: {n_conf}")
     print(f"Invited review talks: {n_invited}")
 
-    new_text = update_summary(text, n_dept, n_conf, n_invited)
-    if new_text != text:
-        TEX_FILE.write_text(new_text, encoding="utf-8")
-        print(f"Written -> {TEX_FILE}")
-    else:
-        print("Summary already up to date.")
+    for tex_file in TEX_FILES:
+        if not tex_file.exists():
+            print(f"[skip] {tex_file} does not exist")
+            continue
+        text = tex_file.read_text(encoding="utf-8")
+        new_text = update_summary(text, n_dept, n_conf, n_invited)
+        if new_text != text:
+            tex_file.write_text(new_text, encoding="utf-8")
+            print(f"Written -> {tex_file}")
+        else:
+            print(f"Already up to date -> {tex_file}")

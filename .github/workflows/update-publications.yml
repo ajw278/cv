@@ -24,18 +24,19 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Regenerate publication list in main.tex
+      - name: Regenerate publication list
         env:
           ADS_API_KEY: ${{ secrets.ADS_API_KEY }}
           SCIX_API_KEY: ${{ secrets.SCIX_API_KEY }}
         # Tries ADS first, automatically falls back to Sci-X if ADS is unreachable.
+        # Writes the full list into main_long.tex and just the summary stats into main.tex.
         run: python generate_publications.py
 
       - name: Commit and push if changed
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add main.tex
+          git add main.tex main_long.tex
           # Only commit if the file actually changed
           git diff --cached --quiet || git commit -m "Auto-update publications [$(date -u +%Y-%m-%d)]"
           git push
