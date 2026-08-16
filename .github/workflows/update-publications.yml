@@ -27,6 +27,8 @@ jobs:
       - name: Regenerate publication list in main.tex
         env:
           ADS_API_KEY: ${{ secrets.ADS_API_KEY }}
+          SCIX_API_KEY: ${{ secrets.SCIX_API_KEY }}
+        # Tries ADS first, automatically falls back to Sci-X if ADS is unreachable.
         run: python generate_publications.py
 
       - name: Commit and push if changed

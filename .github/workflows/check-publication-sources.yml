@@ -1,0 +1,26 @@
+name: Check ADS vs Sci-X consistency
+
+on:
+  workflow_dispatch:   # manual trigger only -- diagnostic, writes nothing
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Compare ADS and Sci-X libraries
+        env:
+          ADS_API_KEY: ${{ secrets.ADS_API_KEY }}
+          SCIX_API_KEY: ${{ secrets.SCIX_API_KEY }}
+        run: python generate_publications.py --compare

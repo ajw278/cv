@@ -1,21 +1,31 @@
 #!/usr/bin/env python3
 """
-Regenerate the Publication List section of main.tex from the ADS library.
+Regenerate the Publication List section of main.tex from ADS / Sci-X.
 
 Usage:
-    python generate_publications.py
+    python generate_publications.py                # ADS, falling back to Sci-X
+    python generate_publications.py --provider scix   # force Sci-X only
+    python generate_publications.py --provider ads    # force ADS only
+    python generate_publications.py --compare         # fetch both, report diffs, write nothing
 
-Fetches every paper in the ADS library, then rewrites the two auto-generated
-blocks in main.tex (first-author and other publications) in place, keeping
-everything else in the file untouched. Also refreshes the h-index / total
-citations / first-author-count numbers quoted in the research summary.
+Fetches every paper in the bibliography library, then rewrites the two
+auto-generated blocks in main.tex (first-author and other publications) in
+place, keeping everything else in the file untouched. Also refreshes the
+h-index / total citations / first-author-count numbers quoted in the
+research summary.
+
+Sci-X (https://scixplorer.org) is the NASA-funded successor to ADS and
+exposes the same API shape at a different host, so it is used as an
+automatic fallback if the ADS request fails (e.g. once ADS is retired).
 
 Requirements:
     pip install requests
 """
 
+import argparse
 import os
 import re
+import sys
 import unicodedata
 from datetime import datetime
 from pathlib import Path
@@ -23,8 +33,20 @@ from pathlib import Path
 import requests
 
 # ── Config ────────────────────────────────────────────────────────────────────
-API_KEY    = os.getenv("ADS_API_KEY",    "m2WhxZnX56sVSewEwcEORL9szXB1JBm7GwE3hW1k")
-LIBRARY_ID = os.getenv("ADS_LIBRARY_ID", "PK0RWOWOTIKWfo-5Fck9sg")
+PROVIDERS = {
+    "ads": {
+        "base":    "https://api.adsabs.harvard.edu/v1",
+        "key":     os.getenv("ADS_API_KEY", "m2WhxZnX56sVSewEwcEORL9szXB1JBm7GwE3hW1k"),
+        "library": os.getenv("ADS_LIBRARY_ID", "PK0RWOWOTIKWfo-5Fck9sg"),
+    },
+    "scix": {
+        "base":    "https://scixplorer.org/v1",
+        "key":     os.getenv("SCIX_API_KEY"),
+        "library": os.getenv("SCIX_LIBRARY_ID", "Ziwc_DaXT5KtyLxi8e9FQA"),
+    },
+}
+# Order in which providers are tried when none is forced explicitly.
+PROVIDER_PRIORITY = ["ads", "scix"]
 
 TEX_FILE = Path(__file__).parent / "main.tex"
 
@@ -73,21 +95,24 @@ START_OTHER = "% ADS-AUTOGEN:OTHER:START"
 END_OTHER   = "% ADS-AUTOGEN:OTHER:END"
 
 
-# ── ADS helpers ───────────────────────────────────────────────────────────────
+# ── ADS / Sci-X helpers ─────────────────────────────────────────────────────
+# Both services expose the same Solr-backed API shape (Sci-X is built on the
+# ADS codebase), so a single set of functions works for either, parameterised
+# by a "provider" dict of {base, key, library}.
 
-def ads_headers():
+def api_headers(provider):
     return {
-        "Authorization": f"Bearer {API_KEY}",
+        "Authorization": f"Bearer {provider['key']}",
         "Accept": "application/json",
     }
 
 
-def fetch_all_bibcodes():
+def fetch_all_bibcodes(provider):
     bibcodes, start, page_size = [], 0, 2000
     while True:
         r = requests.get(
-            f"https://api.adsabs.harvard.edu/v1/biblib/libraries/{LIBRARY_ID}",
-            headers=ads_headers(),
+            f"{provider['base']}/biblib/libraries/{provider['library']}",
+            headers=api_headers(provider),
             params={"rows": page_size, "start": start},
             timeout=60,
         )
@@ -103,14 +128,14 @@ def fetch_all_bibcodes():
     return bibcodes
 
 
-def fetch_metadata(bibcodes):
+def fetch_metadata(provider, bibcodes):
     docs, batch_size = [], 100
     for i in range(0, len(bibcodes), batch_size):
         batch = bibcodes[i : i + batch_size]
         q = " OR ".join(f'bibcode:"{bc}"' for bc in batch)
         r = requests.get(
-            "https://api.adsabs.harvard.edu/v1/search/query",
-            headers=ads_headers(),
+            f"{provider['base']}/search/query",
+            headers=api_headers(provider),
             params={
                 "q": q,
                 "fl": "bibcode,title,author,author_count,pub,volume,page,"
@@ -125,12 +150,12 @@ def fetch_metadata(bibcodes):
     return docs
 
 
-def fetch_metrics(bibcodes):
+def fetch_metrics(provider, bibcodes):
     """Returns (h_index, total_citations); falls back to (None, None) on failure."""
     try:
         r = requests.post(
-            "https://api.adsabs.harvard.edu/v1/metrics",
-            headers={**ads_headers(), "Content-Type": "application/json"},
+            f"{provider['base']}/metrics",
+            headers={**api_headers(provider), "Content-Type": "application/json"},
             json={"bibcodes": bibcodes},
             timeout=60,
         )
@@ -142,6 +167,37 @@ def fetch_metrics(bibcodes):
     except requests.RequestException as exc:
         print(f"  metrics fetch failed ({exc}), skipping stats update")
         return None, None
+
+
+def fetch_all(provider):
+    """Fetch bibcodes, metadata and metrics for a single provider."""
+    bibcodes = fetch_all_bibcodes(provider)
+    print(f"Fetching metadata for {len(bibcodes)} papers...")
+    docs = fetch_metadata(provider, bibcodes)
+    print("Fetching citation metrics...")
+    h_index, total_citations = fetch_metrics(provider, bibcodes)
+    return bibcodes, docs, h_index, total_citations
+
+
+def fetch_with_fallback(order):
+    """Try providers in `order`, returning the first that succeeds.
+
+    Returns (provider_name, bibcodes, docs, h_index, total_citations).
+    """
+    errors = {}
+    for name in order:
+        provider = PROVIDERS[name]
+        if not provider["key"]:
+            print(f"[{name}] no API key configured, skipping")
+            continue
+        print(f"[{name}] fetching library {provider['library']}...")
+        try:
+            bibcodes, docs, h_index, total_citations = fetch_all(provider)
+            return name, bibcodes, docs, h_index, total_citations
+        except requests.RequestException as exc:
+            print(f"[{name}] failed: {exc}")
+            errors[name] = str(exc)
+    raise RuntimeError(f"All providers failed: {errors}")
 
 
 # ── Formatting helpers ───────────────────────────────────────────────────────
@@ -354,15 +410,84 @@ def update_summary_stats(text, h_index, total_citations, n_first):
     return new_text
 
 
+# ── Cross-provider comparison (sanity check, e.g. ADS vs Sci-X) ────────────────
+
+def compare_providers(name_a, name_b):
+    """Fetch both providers and print a diagnostic diff. Writes nothing."""
+    results = {}
+    for name in (name_a, name_b):
+        provider = PROVIDERS[name]
+        if not provider["key"]:
+            print(f"[{name}] no API key configured -- cannot compare")
+            return
+        print(f"[{name}] fetching library {provider['library']}...")
+        bibcodes, docs, h_index, total_citations = fetch_all(provider)
+        results[name] = {
+            "bibcodes": set(bibcodes),
+            "docs": {d["bibcode"]: d for d in docs if d.get("bibcode")},
+            "h_index": h_index,
+            "total_citations": total_citations,
+        }
+
+    a, b = results[name_a], results[name_b]
+    print(f"\n=== {name_a} vs {name_b} ===")
+    print(f"  {name_a}: {len(a['bibcodes'])} docs, h-index {a['h_index']}, {a['total_citations']} total citations")
+    print(f"  {name_b}: {len(b['bibcodes'])} docs, h-index {b['h_index']}, {b['total_citations']} total citations")
+
+    only_a = a["bibcodes"] - b["bibcodes"]
+    only_b = b["bibcodes"] - a["bibcodes"]
+    if only_a:
+        print(f"\n  In {name_a} only ({len(only_a)}): {sorted(only_a)}")
+    if only_b:
+        print(f"  In {name_b} only ({len(only_b)}): {sorted(only_b)}")
+    if not only_a and not only_b:
+        print("\n  Bibcode sets match exactly.")
+
+    common = a["bibcodes"] & b["bibcodes"]
+    cite_diffs = []
+    field_diffs = []
+    for bc in sorted(common):
+        da, db = a["docs"][bc], b["docs"][bc]
+        ca, cb = int(da.get("citation_count") or 0), int(db.get("citation_count") or 0)
+        if abs(ca - cb) > 2:  # allow small drift from differing indexing lag
+            cite_diffs.append((bc, ca, cb))
+        for field in ("title", "pub", "volume", "doctype"):
+            va, vb = da.get(field), db.get(field)
+            if va != vb:
+                field_diffs.append((bc, field, va, vb))
+
+    if cite_diffs:
+        print(f"\n  Citation-count mismatches (>2 apart) for {len(cite_diffs)} papers:")
+        for bc, ca, cb in cite_diffs:
+            print(f"    {bc}: {name_a}={ca}  {name_b}={cb}")
+    else:
+        print("\n  Citation counts agree (within +/-2) for all shared papers.")
+
+    if field_diffs:
+        print(f"\n  Metadata field mismatches ({len(field_diffs)}):")
+        for bc, field, va, vb in field_diffs:
+            print(f"    {bc} [{field}]: {name_a}={va!r}  {name_b}={vb!r}")
+    else:
+        print("  No title/journal/volume/doctype mismatches for shared papers.")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("Fetching bibcodes from ADS library...")
-    bibcodes = fetch_all_bibcodes()
-    print(f"Fetching metadata for {len(bibcodes)} papers...")
-    docs = fetch_metadata(bibcodes)
-    print("Fetching citation metrics...")
-    h_index, total_citations = fetch_metrics(bibcodes)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--provider", choices=["ads", "scix"],
+                         help="Force a single provider instead of trying ADS then falling back to Sci-X.")
+    parser.add_argument("--compare", action="store_true",
+                         help="Fetch from both ADS and Sci-X and print a diagnostic diff; writes nothing.")
+    args = parser.parse_args()
+
+    if args.compare:
+        compare_providers("ads", "scix")
+        sys.exit(0)
+
+    order = [args.provider] if args.provider else PROVIDER_PRIORITY
+    provider_name, bibcodes, docs, h_index, total_citations = fetch_with_fallback(order)
+    print(f"Using provider: {provider_name}")
 
     articles = [d for d in docs if categorise(d) == "article"]
     first_author_docs = [d for d in articles if is_first_author(d)]
