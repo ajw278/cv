@@ -47,7 +47,7 @@ jobs:
           fi
 
       - name: Push to Overleaf
-        if: steps.commit.outputs.changed == 'true'
+        if: always()
         env:
           OVERLEAF_EMAIL: ${{ secrets.OVERLEAF_EMAIL }}
           OVERLEAF_PASSWORD: ${{ secrets.OVERLEAF_PASSWORD }}
