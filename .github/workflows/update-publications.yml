@@ -32,11 +32,25 @@ jobs:
         # Writes the full list into main_long.tex and just the summary stats into main.tex.
         run: python generate_publications.py
 
-      - name: Commit and push if changed
+      - name: Commit and push to GitHub if changed
+        id: commit
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add main.tex main_long.tex
-          # Only commit if the file actually changed
-          git diff --cached --quiet || git commit -m "Auto-update publications [$(date -u +%Y-%m-%d)]"
-          git push
+          if git diff --cached --quiet; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            git commit -m "Auto-update publications [$(date -u +%Y-%m-%d)]"
+            git push
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Push to Overleaf
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          OVERLEAF_EMAIL: ${{ secrets.OVERLEAF_EMAIL }}
+          OVERLEAF_PASSWORD: ${{ secrets.OVERLEAF_PASSWORD }}
+        run: |
+          git remote add overleaf "https://${OVERLEAF_EMAIL}:${OVERLEAF_PASSWORD}@git.overleaf.com/606ed33d11366a3553d36e26"
+          git push overleaf main
