@@ -49,10 +49,7 @@ jobs:
       - name: Push to Overleaf
         if: always()
         env:
-          OVERLEAF_EMAIL: ${{ secrets.OVERLEAF_EMAIL }}
-          OVERLEAF_PASSWORD: ${{ secrets.OVERLEAF_PASSWORD }}
+          OVERLEAF_TOKEN: ${{ secrets.OVERLEAF_TOKEN }}
         run: |
-          # URL-encode the email so the @ doesn't break the git remote URL
-          ENCODED_EMAIL=$(python3 -c "import urllib.parse, os; print(urllib.parse.quote(os.environ['OVERLEAF_EMAIL']))")
-          git remote add overleaf "https://${ENCODED_EMAIL}:${OVERLEAF_PASSWORD}@git.overleaf.com/606ed33d11366a3553d36e26"
+          git remote add overleaf "https://git:${OVERLEAF_TOKEN}@git.overleaf.com/606ed33d11366a3553d36e26"
           git push overleaf main
