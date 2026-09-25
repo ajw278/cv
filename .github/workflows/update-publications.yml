@@ -53,5 +53,5 @@ jobs:
         run: |
           git remote add overleaf "https://git:${OVERLEAF_TOKEN}@git.overleaf.com/606ed33d11366a3553d36e26"
           git fetch overleaf main
-          git rebase overleaf/main
+          git merge overleaf/main -X ours --no-edit
           git push overleaf main
