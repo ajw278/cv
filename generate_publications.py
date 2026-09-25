@@ -39,7 +39,7 @@ import requests
 PROVIDERS = {
     "ads": {
         "base":    "https://api.adsabs.harvard.edu/v1",
-        "key":     os.getenv("ADS_API_KEY", "m2WhxZnX56sVSewEwcEORL9szXB1JBm7GwE3hW1k"),
+        "key":     os.getenv("ADS_API_KEY") or "m2WhxZnX56sVSewEwcEORL9szXB1JBm7GwE3hW1k",
         "library": os.getenv("ADS_LIBRARY_ID", "PK0RWOWOTIKWfo-5Fck9sg"),
     },
     "scix": {
